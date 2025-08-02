@@ -1,0 +1,4 @@
+name: MyPlugins_first
+version: '1.0-SNAPSHOT'
+main: Dim_LJR.myPlugins_first
+api-version: '1.20'
