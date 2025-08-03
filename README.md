@@ -1,2 +1,2 @@
-一个Minecraft插件由LJRDE制作
-A Minecarft Plugins provide by LJRDE
+一个Minecraft武器,装备强化插件
+A Minecraft weapon, equipped with enhanced plugins
