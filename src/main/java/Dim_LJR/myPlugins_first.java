@@ -24,13 +24,11 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
 import java.util.*;
 
 public class myPlugins_first extends JavaPlugin implements Listener {
 
-    // === 常量定义 ===
+    // 常量定义
     private static final String WEAPON_STONE_I_NAME = ChatColor.LIGHT_PURPLE + "武器强化石Ⅰ";
     private static final String WEAPON_STONE_II_NAME = ChatColor.DARK_PURPLE + "武器强化石Ⅱ";
     private static final String ARMOR_STONE_I_NAME = ChatColor.BLUE + "护甲强化石Ⅰ";
@@ -39,6 +37,282 @@ public class myPlugins_first extends JavaPlugin implements Listener {
             ChatColor.GRAY + "右键点击对应装备使用",
             ChatColor.GRAY + "提升装备属性"
     );
+
+    @EventHandler
+    public void onEntitySpawn(EntitySpawnEvent event) {
+        if (event.getEntityType() == EntityType.ZOMBIE || event.getEntityType() == EntityType.SKELETON) {
+            LivingEntity entity = (LivingEntity) event.getEntity();
+            double roll = random.nextDouble();
+
+            // 钻石套装怪物 (2%)
+            if (roll < DIAMOND_ZOMBIE_CHANCE) {
+                equipDiamondArmor(entity);
+                specialMobs.add(entity.getUniqueId());
+                scheduleDespawn(entity);
+            }
+            // 铁套装怪物 (5%)
+            else if (roll < IRON_ZOMBIE_CHANCE) {
+                equipIronArmor(entity);
+                specialMobs.add(entity.getUniqueId());
+                scheduleDespawn(entity);
+            }
+        }
+    }
+
+    private void scheduleDespawn(LivingEntity entity) {
+        if (!config.getBoolean("despawn.enabled")) return;
+
+        BukkitRunnable task = new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (entity.isValid()) {
+                    entity.remove();
+                    specialMobs.remove(entity.getUniqueId());
+                }
+                despawnTasks.remove(entity.getUniqueId());
+            }
+        };
+
+        task.runTaskLater(this, config.getInt("despawn.time"));
+        despawnTasks.put(entity.getUniqueId(), task);
+    }
+
+    private void equipIronArmor(LivingEntity entity) {
+        EntityEquipment equipment = entity.getEquipment();
+        if (equipment != null) {
+            equipment.setHelmet(new ItemStack(Material.IRON_HELMET));
+            equipment.setChestplate(new ItemStack(Material.IRON_CHESTPLATE));
+            equipment.setLeggings(new ItemStack(Material.IRON_LEGGINGS));
+            equipment.setBoots(new ItemStack(Material.IRON_BOOTS));
+
+            if (entity instanceof Zombie) {
+                equipment.setItemInMainHand(new ItemStack(Material.IRON_SWORD));
+            } else if (entity instanceof Skeleton) {
+                equipment.setItemInMainHand(new ItemStack(Material.BOW));
+            }
+
+            // 设置不掉落
+            equipment.setHelmetDropChance(0);
+            equipment.setChestplateDropChance(0);
+            equipment.setLeggingsDropChance(0);
+            equipment.setBootsDropChance(0);
+            equipment.setItemInMainHandDropChance(0);
+        }
+
+        // 强化属性
+        enhanceMob(entity, 2.0, 2.0, 1.1);
+    }
+
+    private void equipDiamondArmor(LivingEntity entity) {
+        EntityEquipment equipment = entity.getEquipment();
+        if (equipment != null) {
+            equipment.setHelmet(new ItemStack(Material.DIAMOND_HELMET));
+            equipment.setChestplate(new ItemStack(Material.DIAMOND_CHESTPLATE));
+            equipment.setLeggings(new ItemStack(Material.DIAMOND_LEGGINGS));
+            equipment.setBoots(new ItemStack(Material.DIAMOND_BOOTS));
+
+            if (entity instanceof Zombie) {
+                equipment.setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+            } else if (entity instanceof Skeleton) {
+                equipment.setItemInMainHand(new ItemStack(Material.BOW));
+            }
+
+            // 设置不掉落
+            equipment.setHelmetDropChance(0);
+            equipment.setChestplateDropChance(0);
+            equipment.setLeggingsDropChance(0);
+            equipment.setBootsDropChance(0);
+            equipment.setItemInMainHandDropChance(0);
+        }
+
+        // 强化属性
+        enhanceMob(entity, 3.0, 3.0, 1.2);
+    }
+
+    private void enhanceMob(LivingEntity entity, double healthMult, double damageMult, double speedMult) {
+        entity.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(20 * healthMult);
+        entity.setHealth(20 * healthMult);
+        entity.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue(2 * damageMult);
+        entity.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.25 * speedMult);
+
+        // 添加发光效果
+        entity.addPotionEffect(new PotionEffect(PotionEffectType.GLOWING, Integer.MAX_VALUE, 0));
+    }
+
+    @EventHandler
+    public void onEntityDeath(EntityDeathEvent event) {
+        if (specialMobs.contains(event.getEntity().getUniqueId())) {
+            // 100% 掉落强化石
+            if (event.getEntity().getEquipment() != null &&
+                    event.getEntity().getEquipment().getHelmet() != null) {
+
+                Material helmet = event.getEntity().getEquipment().getHelmet().getType();
+
+                // 钻石套装掉落Ⅱ级强化石
+                if (helmet == Material.DIAMOND_HELMET) {
+                    event.getDrops().add(createUpgradeStone(2, true));
+                    event.getDrops().add(createUpgradeStone(2, false));
+                }
+                // 铁套装掉落Ⅰ级强化石
+                else if (helmet == Material.IRON_HELMET) {
+                    event.getDrops().add(createUpgradeStone(1, true));
+                    event.getDrops().add(createUpgradeStone(1, false));
+                }
+            }
+
+            specialMobs.remove(event.getEntity().getUniqueId());
+            BukkitRunnable task = despawnTasks.remove(event.getEntity().getUniqueId());
+            if (task != null) task.cancel();
+        }
+    }
+
+    @EventHandler
+    public void onPlayerInteract(PlayerInteractEvent event) {
+        Player player = event.getPlayer();
+        ItemStack clickedItem = event.getItem();
+
+        if (clickedItem == null) return;
+
+        // 检查是否是强化石
+        int stoneType = getUpgradeStoneType(clickedItem);
+        if (stoneType == 0) return;
+
+        boolean isWeaponStone = clickedItem.getItemMeta().getDisplayName().contains("武器");
+        ItemStack targetItem = isWeaponStone ? player.getInventory().getItemInMainHand() :
+                player.getInventory().getItemInOffHand();
+
+        if (isWeaponStone && isWeapon(targetItem.getType())) {
+            upgradeWeapon(player, targetItem, stoneType);
+            clickedItem.setAmount(clickedItem.getAmount() - 1);
+            event.setCancelled(true);
+        } else if (!isWeaponStone && isArmor(targetItem.getType())) {
+            upgradeArmor(player, targetItem, stoneType);
+            clickedItem.setAmount(clickedItem.getAmount() - 1);
+            event.setCancelled(true);
+        } else {
+            player.sendMessage(ChatColor.RED + "你必须手持正确的装备才能使用强化石!");
+        }
+    }
+
+    private void upgradeWeapon(Player player, ItemStack weapon, int stoneLevel) {
+        ItemMeta meta = weapon.getItemMeta();
+
+        // Ⅰ级强化石：提升锋利等级
+        if (stoneLevel == 1) {
+            int currentLevel = meta.getEnchantLevel(Enchantment.DAMAGE_ALL);
+            int newLevel = currentLevel + 1;
+
+            if (newLevel > MAX_ENCHANT_LEVEL) {
+                player.sendMessage(ChatColor.RED + "这把武器的锋利等级已经达到最大值 " + MAX_ENCHANT_LEVEL + "!");
+                return;
+            }
+
+            meta.addEnchant(Enchantment.DAMAGE_ALL, newLevel, true);
+            player.sendMessage(ChatColor.GREEN + "武器强化成功! 锋利等级提升至 " + newLevel);
+        }
+        // Ⅱ级强化石：直接提升伤害
+        else {
+            double damageBonus = 1.0; // 每次提升1点伤害
+            String damageKey = "weapon_damage";
+
+            double currentDamage = meta.hasAttributeModifiers() ?
+                    meta.getAttributeModifiers().get(Attribute.GENERIC_ATTACK_DAMAGE).stream()
+                            .mapToDouble(att -> att.getAmount())
+                            .sum() : 0;
+
+            meta.removeAttributeModifier(Attribute.GENERIC_ATTACK_DAMAGE);
+            meta.addAttributeModifier(Attribute.GENERIC_ATTACK_DAMAGE,
+                    new org.bukkit.attribute.AttributeModifier(
+                            UUID.randomUUID(),
+                            damageKey,
+                            currentDamage + damageBonus,
+                            org.bukkit.attribute.AttributeModifier.Operation.ADD_NUMBER,
+                            EquipmentSlot.HAND
+                    ));
+
+            player.sendMessage(ChatColor.GREEN + "武器强化成功! 基础伤害提升 " + damageBonus + " 点");
+        }
+
+        weapon.setItemMeta(meta);
+        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+    }
+
+    private void upgradeArmor(Player player, ItemStack armor, int stoneLevel) {
+        ItemMeta meta = armor.getItemMeta();
+
+        // Ⅰ级强化石：提升保护等级
+        if (stoneLevel == 1) {
+            int currentLevel = meta.getEnchantLevel(Enchantment.PROTECTION_ENVIRONMENTAL);
+            int newLevel = currentLevel + 1;
+
+            if (newLevel > MAX_ENCHANT_LEVEL) {
+                player.sendMessage(ChatColor.RED + "这件护甲的保护等级已经达到最大值 " + MAX_ENCHANT_LEVEL + "!");
+                return;
+            }
+
+            meta.addEnchant(Enchantment.PROTECTION_ENVIRONMENTAL, newLevel, true);
+            player.sendMessage(ChatColor.GREEN + "护甲强化成功! 保护等级提升至 " + newLevel);
+        }
+        // Ⅱ级强化石：直接提升护甲值
+        else {
+            double armorBonus = 1.0; // 每次提升1点护甲值
+            String armorKey = "armor_value";
+
+            double currentArmor = meta.hasAttributeModifiers() ?
+                    meta.getAttributeModifiers().get(Attribute.GENERIC_ARMOR).stream()
+                            .mapToDouble(att -> att.getAmount())
+                            .sum() : 0;
+
+            meta.removeAttributeModifier(Attribute.GENERIC_ARMOR);
+            meta.addAttributeModifier(Attribute.GENERIC_ARMOR,
+                    new org.bukkit.attribute.AttributeModifier(
+                            UUID.randomUUID(),
+                            armorKey,
+                            currentArmor + armorBonus,
+                            org.bukkit.attribute.AttributeModifier.Operation.ADD_NUMBER,
+                            getEquipmentSlot(armor.getType())
+                    ));
+
+            player.sendMessage(ChatColor.GREEN + "护甲强化成功! 护甲值提升 " + armorBonus + " 点");
+        }
+
+        armor.setItemMeta(meta);
+        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+    }
+
+    private EquipmentSlot getEquipmentSlot(Material material) {
+        if (material.name().endsWith("_HELMET")) return EquipmentSlot.HEAD;
+        if (material.name().endsWith("_CHESTPLATE")) return EquipmentSlot.CHEST;
+        if (material.name().endsWith("_LEGGINGS")) return EquipmentSlot.LEGS;
+        if (material.name().endsWith("_BOOTS")) return EquipmentSlot.FEET;
+        return EquipmentSlot.HAND;
+    }
+
+    private int getUpgradeStoneType(ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return 0;
+
+        String name = item.getItemMeta().getDisplayName();
+        if (name.equals(WEAPON_STONE_I_NAME) || name.equals(ARMOR_STONE_I_NAME)) return 1;
+        if (name.equals(WEAPON_STONE_II_NAME) || name.equals(ARMOR_STONE_II_NAME)) return 2;
+        return 0;
+    }
+
+    private ItemStack createUpgradeStone(int level, boolean isWeaponStone) {
+        Material material = level == 1 ?
+                (isWeaponStone ? Material.EMERALD : Material.DIAMOND) :
+                (isWeaponStone ? Material.NETHERITE_SCRAP : Material.NETHERITE_INGOT);
+
+        ItemStack stone = new ItemStack(material);
+        ItemMeta meta = stone.getItemMeta();
+
+        meta.setDisplayName(isWeaponStone ?
+                (level == 1 ? WEAPON_STONE_I_NAME : WEAPON_STONE_II_NAME) :
+                (level == 1 ? ARMOR_STONE_I_NAME : ARMOR_STONE_II_NAME));
+
+        meta.setLore(STONE_LORE);
+        stone.setItemMeta(meta);
+        return stone;
+    }
 
     private static final int MAX_ENCHANT_LEVEL = 100;
     private static final double IRON_ZOMBIE_CHANCE = 0.05;
@@ -51,45 +325,20 @@ public class myPlugins_first extends JavaPlugin implements Listener {
 
     @Override
     public void onEnable() {
-        // 确保插件数据文件夹存在
-        if (!getDataFolder().exists()) {
-            getDataFolder().mkdirs();
-        }
-
-        // 加载配置文件
         loadConfig();
-
-        // 注册事件监听器
         getServer().getPluginManager().registerEvents(this, this);
-
         getLogger().info("终极强化插件已启用!");
     }
 
     private void loadConfig() {
         File configFile = new File(getDataFolder(), "config.yml");
-
-        // 如果配置文件不存在，从jar中复制默认配置
         if (!configFile.exists()) {
-            try (InputStream in = getResource("config.yml")) {
-                if (in != null) {
-                    Files.copy(in, configFile.toPath());
-                } else {
-                    getLogger().warning("无法找到默认配置文件!");
-                    saveResource("config.yml", false);
-                }
-            } catch (IOException e) {
-                getLogger().warning("无法创建配置文件: " + e.getMessage());
-            }
+            saveResource("config.yml", false);
         }
-
-        // 加载配置
         config = YamlConfiguration.loadConfiguration(configFile);
-
-        // 设置默认值
         config.addDefault("despawn.enabled", true);
         config.addDefault("despawn.time", 1440);
         config.options().copyDefaults(true);
-
         try {
             config.save(configFile);
         } catch (IOException e) {
@@ -100,7 +349,6 @@ public class myPlugins_first extends JavaPlugin implements Listener {
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
         if (!cmd.getName().equalsIgnoreCase("qianghua")) return false;
-
         if (!sender.hasPermission("weaponupgrade.admin")) {
             sender.sendMessage(ChatColor.RED + "你没有权限使用此命令!");
             return true;
@@ -271,259 +519,7 @@ public class myPlugins_first extends JavaPlugin implements Listener {
         return true;
     }
 
-    @EventHandler
-    public void onEntitySpawn(EntitySpawnEvent event) {
-        if (event.getEntityType() == EntityType.ZOMBIE || event.getEntityType() == EntityType.SKELETON) {
-            LivingEntity entity = (LivingEntity) event.getEntity();
-            double roll = random.nextDouble();
-
-            if (roll < DIAMOND_ZOMBIE_CHANCE) {
-                equipDiamondArmor(entity);
-                specialMobs.add(entity.getUniqueId());
-                scheduleDespawn(entity);
-            } else if (roll < IRON_ZOMBIE_CHANCE) {
-                equipIronArmor(entity);
-                specialMobs.add(entity.getUniqueId());
-                scheduleDespawn(entity);
-            }
-        }
-    }
-
-    @EventHandler
-    public void onEntityDeath(EntityDeathEvent event) {
-        if (specialMobs.contains(event.getEntity().getUniqueId())) {
-            if (event.getEntity().getEquipment() != null &&
-                    event.getEntity().getEquipment().getHelmet() != null) {
-
-                Material helmet = event.getEntity().getEquipment().getHelmet().getType();
-
-                if (helmet == Material.DIAMOND_HELMET) {
-                    event.getDrops().add(createUpgradeStone(2, true));
-                    event.getDrops().add(createUpgradeStone(2, false));
-                } else if (helmet == Material.IRON_HELMET) {
-                    event.getDrops().add(createUpgradeStone(1, true));
-                    event.getDrops().add(createUpgradeStone(1, false));
-                }
-            }
-
-            specialMobs.remove(event.getEntity().getUniqueId());
-            BukkitRunnable task = despawnTasks.remove(event.getEntity().getUniqueId());
-            if (task != null) task.cancel();
-        }
-    }
-
-    @EventHandler
-    public void onPlayerInteract(PlayerInteractEvent event) {
-        Player player = event.getPlayer();
-        ItemStack clickedItem = event.getItem();
-
-        if (clickedItem == null) return;
-
-        int stoneType = getUpgradeStoneType(clickedItem);
-        if (stoneType == 0) return;
-
-        boolean isWeaponStone = clickedItem.getItemMeta().getDisplayName().contains("武器");
-        ItemStack targetItem = isWeaponStone ? player.getInventory().getItemInMainHand() :
-                player.getInventory().getItemInOffHand();
-
-        if (isWeaponStone && isWeapon(targetItem.getType())) {
-            upgradeWeapon(player, targetItem, stoneType);
-            clickedItem.setAmount(clickedItem.getAmount() - 1);
-            event.setCancelled(true);
-        }
-        else if (!isWeaponStone && isArmor(targetItem.getType())) {
-            upgradeArmor(player, targetItem, stoneType);
-            clickedItem.setAmount(clickedItem.getAmount() - 1);
-            event.setCancelled(true);
-        }
-        else {
-            player.sendMessage(ChatColor.RED + "你必须手持正确的装备才能使用强化石!");
-        }
-    }
-
-    private ItemStack createUpgradeStone(int level, boolean isWeaponStone) {
-        Material material;
-        String displayName;
-
-        if (level == 1) {
-            material = isWeaponStone ? Material.EMERALD : Material.DIAMOND;
-            displayName = isWeaponStone ? WEAPON_STONE_I_NAME : ARMOR_STONE_I_NAME;
-        } else {
-            material = isWeaponStone ? Material.NETHERITE_SCRAP : Material.NETHERITE_INGOT;
-            displayName = isWeaponStone ? WEAPON_STONE_II_NAME : ARMOR_STONE_II_NAME;
-        }
-
-        ItemStack stone = new ItemStack(material);
-        ItemMeta meta = stone.getItemMeta();
-        meta.setDisplayName(displayName);
-        meta.setLore(STONE_LORE);
-        stone.setItemMeta(meta);
-        return stone;
-    }
-
-    private int getUpgradeStoneType(ItemStack item) {
-        if (item == null || !item.hasItemMeta()) return 0;
-
-        String name = item.getItemMeta().getDisplayName();
-        if (name.equals(WEAPON_STONE_I_NAME) || name.equals(ARMOR_STONE_I_NAME)) return 1;
-        if (name.equals(WEAPON_STONE_II_NAME) || name.equals(ARMOR_STONE_II_NAME)) return 2;
-        return 0;
-    }
-
-    private void equipIronArmor(LivingEntity entity) {
-        EntityEquipment equipment = entity.getEquipment();
-        if (equipment != null) {
-            equipment.setHelmet(new ItemStack(Material.IRON_HELMET));
-            equipment.setChestplate(new ItemStack(Material.IRON_CHESTPLATE));
-            equipment.setLeggings(new ItemStack(Material.IRON_LEGGINGS));
-            equipment.setBoots(new ItemStack(Material.IRON_BOOTS));
-
-            if (entity instanceof Zombie) {
-                equipment.setItemInMainHand(new ItemStack(Material.IRON_SWORD));
-            } else if (entity instanceof Skeleton) {
-                equipment.setItemInMainHand(new ItemStack(Material.BOW));
-            }
-
-            equipment.setHelmetDropChance(0);
-            equipment.setChestplateDropChance(0);
-            equipment.setLeggingsDropChance(0);
-            equipment.setBootsDropChance(0);
-            equipment.setItemInMainHandDropChance(0);
-        }
-
-        enhanceMob(entity, 2.0, 2.0, 1.1);
-    }
-
-    private void equipDiamondArmor(LivingEntity entity) {
-        EntityEquipment equipment = entity.getEquipment();
-        if (equipment != null) {
-            equipment.setHelmet(new ItemStack(Material.DIAMOND_HELMET));
-            equipment.setChestplate(new ItemStack(Material.DIAMOND_CHESTPLATE));
-            equipment.setLeggings(new ItemStack(Material.DIAMOND_LEGGINGS));
-            equipment.setBoots(new ItemStack(Material.DIAMOND_BOOTS));
-
-            if (entity instanceof Zombie) {
-                equipment.setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
-            } else if (entity instanceof Skeleton) {
-                equipment.setItemInMainHand(new ItemStack(Material.BOW));
-            }
-
-            equipment.setHelmetDropChance(0);
-            equipment.setChestplateDropChance(0);
-            equipment.setLeggingsDropChance(0);
-            equipment.setBootsDropChance(0);
-            equipment.setItemInMainHandDropChance(0);
-        }
-
-        enhanceMob(entity, 3.0, 3.0, 1.2);
-    }
-
-    private void enhanceMob(LivingEntity entity, double healthMult, double damageMult, double speedMult) {
-        entity.getAttribute(Attribute.GENERIC_MAX_HEALTH).setBaseValue(20 * healthMult);
-        entity.setHealth(20 * healthMult);
-        entity.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE).setBaseValue(2 * damageMult);
-        entity.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED).setBaseValue(0.25 * speedMult);
-
-        entity.addPotionEffect(new PotionEffect(PotionEffectType.GLOWING, Integer.MAX_VALUE, 0));
-    }
-
-    private void scheduleDespawn(LivingEntity entity) {
-        if (!config.getBoolean("despawn.enabled")) return;
-
-        BukkitRunnable task = new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (entity.isValid()) {
-                    entity.remove();
-                    specialMobs.remove(entity.getUniqueId());
-                }
-                despawnTasks.remove(entity.getUniqueId());
-            }
-        };
-
-        task.runTaskLater(this, config.getInt("despawn.time"));
-        despawnTasks.put(entity.getUniqueId(), task);
-    }
-
-    private void upgradeWeapon(Player player, ItemStack weapon, int stoneLevel) {
-        ItemMeta meta = weapon.getItemMeta();
-
-        if (stoneLevel == 1) {
-            int currentLevel = meta.getEnchantLevel(Enchantment.DAMAGE_ALL);
-            int newLevel = currentLevel + 1;
-
-            if (newLevel > MAX_ENCHANT_LEVEL) {
-                player.sendMessage(ChatColor.RED + "这把武器的锋利等级已经达到最大值 " + MAX_ENCHANT_LEVEL + "!");
-                return;
-            }
-
-            meta.addEnchant(Enchantment.DAMAGE_ALL, newLevel, true);
-            player.sendMessage(ChatColor.GREEN + "武器强化成功! 锋利等级提升至 " + newLevel);
-        } else {
-            double damageBonus = 1.0;
-            String damageKey = "weapon_damage";
-
-            double currentDamage = meta.hasAttributeModifiers() ?
-                    meta.getAttributeModifiers().get(Attribute.GENERIC_ATTACK_DAMAGE).stream()
-                            .mapToDouble(att -> att.getAmount())
-                            .sum() : 0;
-
-            meta.removeAttributeModifier(Attribute.GENERIC_ATTACK_DAMAGE);
-            meta.addAttributeModifier(Attribute.GENERIC_ATTACK_DAMAGE,
-                    new org.bukkit.attribute.AttributeModifier(
-                            UUID.randomUUID(),
-                            damageKey,
-                            currentDamage + damageBonus,
-                            org.bukkit.attribute.AttributeModifier.Operation.ADD_NUMBER,
-                            EquipmentSlot.HAND
-                    ));
-
-            player.sendMessage(ChatColor.GREEN + "武器强化成功! 基础伤害提升 " + damageBonus + " 点");
-        }
-
-        weapon.setItemMeta(meta);
-        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
-    }
-
-    private void upgradeArmor(Player player, ItemStack armor, int stoneLevel) {
-        ItemMeta meta = armor.getItemMeta();
-
-        if (stoneLevel == 1) {
-            int currentLevel = meta.getEnchantLevel(Enchantment.PROTECTION_ENVIRONMENTAL);
-            int newLevel = currentLevel + 1;
-
-            if (newLevel > MAX_ENCHANT_LEVEL) {
-                player.sendMessage(ChatColor.RED + "这件护甲的保护等级已经达到最大值 " + MAX_ENCHANT_LEVEL + "!");
-                return;
-            }
-
-            meta.addEnchant(Enchantment.PROTECTION_ENVIRONMENTAL, newLevel, true);
-            player.sendMessage(ChatColor.GREEN + "护甲强化成功! 保护等级提升至 " + newLevel);
-        } else {
-            double armorBonus = 1.0;
-            String armorKey = "armor_value";
-
-            double currentArmor = meta.hasAttributeModifiers() ?
-                    meta.getAttributeModifiers().get(Attribute.GENERIC_ARMOR).stream()
-                            .mapToDouble(att -> att.getAmount())
-                            .sum() : 0;
-
-            meta.removeAttributeModifier(Attribute.GENERIC_ARMOR);
-            meta.addAttributeModifier(Attribute.GENERIC_ARMOR,
-                    new org.bukkit.attribute.AttributeModifier(
-                            UUID.randomUUID(),
-                            armorKey,
-                            currentArmor + armorBonus,
-                            org.bukkit.attribute.AttributeModifier.Operation.ADD_NUMBER,
-                            getEquipmentSlot(armor.getType())
-                    ));
-
-            player.sendMessage(ChatColor.GREEN + "护甲强化成功! 护甲值提升 " + armorBonus + " 点");
-        }
-
-        armor.setItemMeta(meta);
-        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
-    }
+    // 其他方法保持不变...
 
     private boolean isWeapon(Material material) {
         return material.name().endsWith("_SWORD") ||
@@ -536,13 +532,5 @@ public class myPlugins_first extends JavaPlugin implements Listener {
                 material.name().endsWith("_CHESTPLATE") ||
                 material.name().endsWith("_LEGGINGS") ||
                 material.name().endsWith("_BOOTS");
-    }
-
-    private EquipmentSlot getEquipmentSlot(Material material) {
-        if (material.name().endsWith("_HELMET")) return EquipmentSlot.HEAD;
-        if (material.name().endsWith("_CHESTPLATE")) return EquipmentSlot.CHEST;
-        if (material.name().endsWith("_LEGGINGS")) return EquipmentSlot.LEGS;
-        if (material.name().endsWith("_BOOTS")) return EquipmentSlot.FEET;
-        return EquipmentSlot.HAND;
     }
 }
